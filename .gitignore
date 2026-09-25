@@ -1,0 +1,7 @@
+__pycache__/
+*.py[cod]
+backend/recovery_cases.sqlite3
+backend/recovered/*
+!backend/recovered/.gitkeep
+.env
+.venv/
