@@ -1,0 +1,110 @@
+[
+  {
+    "file": "intact_photo.jpg",
+    "condition": "intact",
+    "expectedType": "photo",
+    "bytes": 773,
+    "inputSha256": "b0a0cb2b43ae14a1d068e11d7736b4353adc49e9c4c0f7d335e850b78d1f83ea",
+    "sourceSha256": "b0a0cb2b43ae14a1d068e11d7736b4353adc49e9c4c0f7d335e850b78d1f83ea",
+    "fragmentationMethod": null
+  },
+  {
+    "file": "fragmented_photo.jpg",
+    "condition": "fragmented",
+    "expectedType": "photo",
+    "bytes": 805,
+    "inputSha256": "1e50411d00bac4e0755d9606ae413be0d165aafff3ed28466e9be290cfc0d23c",
+    "sourceSha256": "b0a0cb2b43ae14a1d068e11d7736b4353adc49e9c4c0f7d335e850b78d1f83ea",
+    "fragmentationMethod": "ordered chunks separated by a synthetic zero-filled gap"
+  },
+  {
+    "file": "corrupted_photo.jpg",
+    "condition": "corrupted",
+    "expectedType": "photo",
+    "bytes": 765,
+    "inputSha256": "18837649e0f4bf3b5df1f74d00bcad3385a5cfb531791d9a8dcbec9ad41dcaeb",
+    "sourceSha256": "b0a0cb2b43ae14a1d068e11d7736b4353adc49e9c4c0f7d335e850b78d1f83ea",
+    "fragmentationMethod": null
+  },
+  {
+    "file": "intact_document.pdf",
+    "condition": "intact",
+    "expectedType": "document",
+    "bytes": 431,
+    "inputSha256": "c8fe459364c212577aad0bd9a9eb8ffad6d1d441a3cdd4229729ec0dcca3cb53",
+    "sourceSha256": "c8fe459364c212577aad0bd9a9eb8ffad6d1d441a3cdd4229729ec0dcca3cb53",
+    "fragmentationMethod": null
+  },
+  {
+    "file": "fragmented_document.pdf",
+    "condition": "fragmented",
+    "expectedType": "document",
+    "bytes": 463,
+    "inputSha256": "699af515a7f7dab23af0dd09115c2782186313e3d92a1ea509ef51d13ddb9337",
+    "sourceSha256": "c8fe459364c212577aad0bd9a9eb8ffad6d1d441a3cdd4229729ec0dcca3cb53",
+    "fragmentationMethod": "ordered chunks separated by a synthetic zero-filled gap"
+  },
+  {
+    "file": "corrupted_document.pdf",
+    "condition": "corrupted",
+    "expectedType": "document",
+    "bytes": 423,
+    "inputSha256": "f78530e76690f965815b6e6b37d8479a7f5b47582c1e5a3f3c50b8436eab183a",
+    "sourceSha256": "c8fe459364c212577aad0bd9a9eb8ffad6d1d441a3cdd4229729ec0dcca3cb53",
+    "fragmentationMethod": null
+  },
+  {
+    "file": "intact_database.sqlite",
+    "condition": "intact",
+    "expectedType": "database",
+    "bytes": 8192,
+    "inputSha256": "9db85a9ad7414daffe912f6f4c8c19940be0aa964184f7fcee0ab00057d406ad",
+    "sourceSha256": "9db85a9ad7414daffe912f6f4c8c19940be0aa964184f7fcee0ab00057d406ad",
+    "fragmentationMethod": null
+  },
+  {
+    "file": "fragmented_database.sqlite",
+    "condition": "fragmented",
+    "expectedType": "database",
+    "bytes": 8224,
+    "inputSha256": "3938770af63f24aa2fa75dbed4f8b3b8893ab24794f5c052f22514d5d7e038ed",
+    "sourceSha256": "9db85a9ad7414daffe912f6f4c8c19940be0aa964184f7fcee0ab00057d406ad",
+    "fragmentationMethod": "ordered chunks separated by a synthetic zero-filled gap"
+  },
+  {
+    "file": "corrupted_database.sqlite",
+    "condition": "corrupted",
+    "expectedType": "database",
+    "bytes": 8192,
+    "inputSha256": "ef21e8095c9189d4a4b759c1b6cddc10abd9ac4e170a20b45ad8eb158e500a62",
+    "sourceSha256": "9db85a9ad7414daffe912f6f4c8c19940be0aa964184f7fcee0ab00057d406ad",
+    "fragmentationMethod": null
+  },
+  {
+    "file": "intact_archive.zip",
+    "condition": "intact",
+    "expectedType": "archive",
+    "bytes": 272,
+    "inputSha256": "5c54cf168950fecf6536f8697f98e4ff0a4851dadeab53091d3fd281df8023b2",
+    "sourceSha256": "5c54cf168950fecf6536f8697f98e4ff0a4851dadeab53091d3fd281df8023b2",
+    "fragmentationMethod": null
+  },
+  {
+    "file": "fragmented_archive.zip",
+    "condition": "fragmented",
+    "expectedType": "archive",
+    "bytes": 304,
+    "inputSha256": "b98ff29be99bd2332045ba20a6f5ddfd295ae03379622c72e1711e11cd17ca0b",
+    "sourceSha256": "5c54cf168950fecf6536f8697f98e4ff0a4851dadeab53091d3fd281df8023b2",
+    "fragmentationMethod": "ordered chunks separated by a synthetic zero-filled gap"
+  },
+  {
+    "file": "corrupted_archive.zip",
+    "condition": "corrupted",
+    "expectedType": "archive",
+    "bytes": 264,
+    "inputSha256": "401e6fe128a3f7ce4e876da098b27dc67c5e92954a1bd43046488625afaeb60e",
+    "sourceSha256": "5c54cf168950fecf6536f8697f98e4ff0a4851dadeab53091d3fd281df8023b2",
+    "fragmentationMethod": null
+  }
+]

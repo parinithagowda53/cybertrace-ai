@@ -3,5 +3,7 @@ __pycache__/
 backend/recovery_cases.sqlite3
 backend/recovered/*
 !backend/recovered/.gitkeep
+backend/evidence/*
+!backend/evidence/.gitkeep
 .env
 .venv/

@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import json
 import io
+import hashlib
 import math
 import mimetypes
 import os
 import re
 import sqlite3
+import struct
 import tempfile
 import threading
 import time
@@ -23,6 +25,7 @@ PORT = int(os.getenv("PORT", "8000"))
 FRONTEND = Path(__file__).parent / "frontend"
 DATABASE = Path(__file__).parent / "recovery_cases.sqlite3"
 RECOVERED = Path(__file__).parent / "recovered"
+EVIDENCE = Path(__file__).parent / "evidence"
 JOBS: dict[str, dict] = {}
 JOBS_LOCK = threading.Lock()
 
@@ -136,14 +139,22 @@ def find_all_signatures(data: bytes, signature: bytes) -> list[int]:
 def analyze(data: bytes, filename: str, source: str = "uploaded media") -> dict:
     artifacts = []
     all_headers = sorted(offset for header, _, _, _ in SIGNATURES.values() for offset in find_all_signatures(data, header))
+    archive_ranges = []
     for label, (header, footer, category, priority) in SIGNATURES.items():
         for offset in find_all_signatures(data, header):
+            if category == "archive" and any(start <= offset < end for start, end in archive_ranges):
+                continue
             end = data.find(footer, offset + len(header)) if footer else -1
             if end < 0 and not footer:
                 next_header = next((candidate for candidate in all_headers if candidate > offset), len(data))
                 recovered_end = next_header
             else:
                 recovered_end = end + len(footer) if end >= 0 else len(data)
+            if category == "archive" and end >= 0 and end + 22 <= len(data):
+                comment_length = struct.unpack_from("<H", data, end + 20)[0]
+                recovered_end = min(len(data), end + 22 + comment_length)
+            if category == "archive":
+                archive_ranges.append((offset, recovered_end))
             payload = data[offset:recovered_end]
             entropy = shannon_entropy(payload)
             missing = ranges_for_gaps(payload)
@@ -195,6 +206,14 @@ def analyze(data: bytes, filename: str, source: str = "uploaded media") -> dict:
 
     artifacts.sort(key=lambda item: item["offset"])
     relationships = []
+    graph_nodes = [artifact["id"] for artifact in artifacts]
+    node_details = [{"id": artifact["id"], "label": artifact["name"], "kind": "artifact"} for artifact in artifacts]
+    for artifact in artifacts:
+        for cluster_index, cluster in enumerate(artifact.get("missingClusters", []), start=1):
+            cluster_id = f"{artifact['id']}-cluster-{cluster_index}"
+            graph_nodes.append(cluster_id)
+            node_details.append({"id": cluster_id, "label": f"unresolved cluster · {cluster['length']} bytes", "kind": "cluster"})
+            relationships.append({"from": artifact["id"], "to": cluster_id, "gap": cluster["offset"], "relationship": "contains unresolved cluster"})
     for previous, current in zip(artifacts, artifacts[1:]):
         gap = current["offset"] - (previous["offset"] + previous["size"])
         if 0 <= gap <= 256:
@@ -210,7 +229,7 @@ def analyze(data: bytes, filename: str, source: str = "uploaded media") -> dict:
         "recoverableBytes": recoverable_bytes,
         "overallIntegrity": round(sum(a["integrity"] for a in artifacts) / len(artifacts)),
         "artifacts": sorted(artifacts, key=lambda item: (-item["mlScore"], {"critical": 0, "high": 1, "medium": 2}.get(item["priority"], 3))),
-        "fragmentGraph": {"nodes": [artifact["id"] for artifact in artifacts], "edges": relationships},
+        "fragmentGraph": {"nodes": graph_nodes, "nodeDetails": node_details, "edges": relationships},
         "model": {"name": "RecoveryRanker", "type": "logistic regression", "features": list(RANKER.feature_names), "trainingRows": 6},
         "recommendations": [
             "Export high-confidence artifacts before attempting repair of low-confidence clusters.",
@@ -261,32 +280,58 @@ def remove_missing_clusters(payload: bytes, clusters: list[dict]) -> bytes:
 
 
 def reconstruct_payload(payload: bytes, clusters: list[dict], category: str) -> bytes:
-    if category not in ("photo", "document") or not clusters:
+    if not clusters:
+        return payload
+    if category not in ("photo", "document", "database", "archive"):
         return remove_missing_clusters(payload, clusters)
-    try:
-        from PIL import Image
-        from pypdf import PdfReader
-    except ImportError:
-        Image = None
-        PdfReader = None
     best = None
     cluster_count = min(len(clusters), 12)
     for mask in range(1 << cluster_count):
         selected = [clusters[index] for index in range(cluster_count) if mask & (1 << index)]
         candidate = remove_missing_clusters(payload, selected)
-        try:
-            if category == "photo":
-                with Image.open(io.BytesIO(candidate)) as image:
-                    image.verify()
-            else:
-                reader = PdfReader(io.BytesIO(candidate), strict=False)
-                if not reader.pages:
-                    continue
+        validation = validate_artifact(candidate, category)
+        if validation["valid"]:
             if best is None or len(candidate) > len(best):
                 best = candidate
-        except Exception:
-            continue
     return best if best is not None else remove_missing_clusters(payload, clusters)
+
+
+def validate_artifact(data: bytes, category: str) -> dict:
+    try:
+        if category == "photo":
+            from PIL import Image
+            with Image.open(io.BytesIO(data)) as image:
+                image.verify()
+                return {"valid": True, "format": image.format, "width": image.width, "height": image.height}
+        if category == "document":
+            from pypdf import PdfReader
+            reader = PdfReader(io.BytesIO(data), strict=False)
+            return {"valid": bool(reader.pages), "format": "PDF", "pages": len(reader.pages)}
+        if category == "archive":
+            import zipfile
+            with zipfile.ZipFile(io.BytesIO(data)) as archive:
+                corrupt_member = archive.testzip()
+                return {"valid": corrupt_member is None, "format": "ZIP", "members": len(archive.infolist()), "corruptMember": corrupt_member}
+        if category == "database":
+            database_file = tempfile.NamedTemporaryFile(suffix=".sqlite", delete=False)
+            database_path = Path(database_file.name)
+            try:
+                database_file.write(data)
+                database_file.close()
+                connection = sqlite3.connect(database_path)
+                try:
+                    integrity = connection.execute("PRAGMA integrity_check").fetchone()[0]
+                    tables = connection.execute("SELECT count(*) FROM sqlite_master WHERE type = 'table'").fetchone()[0]
+                finally:
+                    connection.close()
+                return {"valid": integrity == "ok", "format": "SQLite", "integrityCheck": integrity, "tables": tables}
+            finally:
+                if not database_file.closed:
+                    database_file.close()
+                database_path.unlink(missing_ok=True)
+    except Exception as error:
+        return {"valid": False, "format": category, "error": str(error)}
+    return {"valid": False, "format": category, "error": "No validator available"}
 
 
 def save_case(result: dict, source_data: bytes | None = None) -> dict:
@@ -300,6 +345,15 @@ def save_case(result: dict, source_data: bytes | None = None) -> dict:
     result["caseId"] = case_id
     result["createdAt"] = created_at
     if source_data is not None:
+        EVIDENCE.mkdir(exist_ok=True)
+        suffix = Path(result["filename"]).suffix.lower() or ".bin"
+        evidence_file = EVIDENCE / f"{case_id}_input{suffix}"
+        evidence_file.write_bytes(source_data)
+        result["inputFile"] = str(evidence_file)
+        result["inputUrl"] = f"/api/evidence/{case_id}"
+        result["inputSha256"] = hashlib.sha256(source_data).hexdigest()
+        result["inputBytes"] = len(source_data)
+        result["provenance"] = [{"event": "evidence acquired", "timestamp": created_at, "filename": result["filename"], "sha256": result["inputSha256"], "bytes": len(source_data), "readOnly": True}]
         RECOVERED.mkdir(exist_ok=True)
         for artifact in result["artifacts"]:
             recovered_file = RECOVERED / f"{case_id}_{artifact['id']}{recovered_extension(artifact['type'])}"
@@ -338,6 +392,25 @@ def save_case(result: dict, source_data: bytes | None = None) -> dict:
                     artifact["viewableUrl"] = f"/api/viewable/{case_id}/{artifact['id']}"
                 except Exception as error:
                     artifact["viewableError"] = f"Reconstructed photo could not be decoded: {error}"
+            artifact["validation"] = validate_artifact(reconstructed, artifact["type"])
+            if artifact["validation"]["valid"]:
+                repaired_bytes = artifact["reconstruction"]["removedBytes"]
+                if repaired_bytes:
+                    artifact["status"] = "partially recoverable"
+                    artifact["decision"] = "restore after review"
+                else:
+                    artifact["status"] = "recoverable"
+                    artifact["decision"] = "restore first" if artifact["integrity"] >= 75 else "restore after review"
+                artifact["decisionBasis"] = "format validation and reconstruction evidence"
+            else:
+                artifact["status"] = "needs review"
+                artifact["decision"] = "manual investigation"
+                artifact["decisionBasis"] = "format validation failed"
+                artifact["evidence"].append("Format validation failed: " + artifact["validation"].get("error", "integrity check failed"))
+            artifact["rawSha256"] = hashlib.sha256(payload).hexdigest()
+            artifact["reconstructedSha256"] = hashlib.sha256(reconstructed).hexdigest()
+            if artifact.get("viewableFile"):
+                artifact["viewableSha256"] = hashlib.sha256(Path(artifact["viewableFile"]).read_bytes()).hexdigest()
         with sqlite3.connect(DATABASE) as connection:
             connection.execute("UPDATE cases SET result_json = ? WHERE case_id = ?", (json.dumps(result), case_id))
     return result
@@ -401,15 +474,114 @@ def report_text(case: dict) -> str:
         "=" * 48,
         f"Case ID: {case['caseId']}",
         f"Input: {case['filename']}",
+        f"Input SHA-256: {case.get('inputSha256', 'not recorded')}",
+        f"Input bytes: {case.get('inputBytes', 'not recorded')}",
         f"Overall integrity: {case['overallIntegrity']}%",
         f"Fragments mapped: {case['fragmentCount']}",
         f"Unresolved clusters: {case['unresolvedClusters']}",
         "",
         "ARTIFACTS",
     ]
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
     for artifact in case["artifacts"]:
         lines.append(f"- {artifact['name']} | {artifact['status']} | integrity {artifact['integrity']}% | ML rank {artifact.get('mlScore', 0)}% | {artifact.get('decision', 'manual investigation')}")
-    lines.extend(["", "FRAGMENT RELATIONSHIPS", json.dumps(case.get("fragmentGraph", {}), indent=2), "", "RECOMMENDATIONS"])
+        if artifact.get("validation"):
+            lines.append(f"  Validation: {artifact['validation'].get('valid')} | raw SHA-256: {artifact.get('rawSha256', 'not recorded')} | reconstructed SHA-256: {artifact.get('reconstructedSha256', 'not recorded')}")
+    lines.extend(["", "PROVENANCE", json.dumps(case.get("provenance", []), indent=2), "", "FRAGMENT RELATIONSHIPS", json.dumps(case.get("fragmentGraph", {}), indent=2), "", "RECOMMENDATIONS"])
     lines.extend(f"- {recommendation}" for recommendation in case["recommendations"])
     return "\n".join(lines)
 
@@ -436,6 +608,22 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(save_case(analyze(data, "forensic-demo.img", "synthetic damaged media"), data))
         if path == "/api/cases":
             return self._send({"cases": list_cases()})
+        if path.startswith("/api/evidence/"):
+            case_id = path.rsplit("/", 1)[-1]
+            case = get_case(case_id)
+            if not case or not case.get("inputFile"):
+                return self._send({"error": "evidence not found"}, 404)
+            evidence_file = Path(case["inputFile"])
+            if not evidence_file.is_file() or evidence_file.parent.resolve() != EVIDENCE.resolve():
+                return self._send({"error": "evidence file unavailable"}, 404)
+            body = evidence_file.read_bytes()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/octet-stream")
+            self.send_header("Content-Disposition", f"attachment; filename={evidence_file.name}")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
         if path.startswith("/api/jobs/"):
             job_id = path.rsplit("/", 1)[-1]
             with JOBS_LOCK:

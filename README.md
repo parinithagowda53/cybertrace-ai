@@ -6,6 +6,21 @@ The ranking layer uses a dependency-free logistic-regression model trained at st
 
 Analysis results are persisted in `backend/recovery_cases.sqlite3`, a local SQLite database created automatically on first start. The history endpoint is available at `GET /api/cases`.
 
+Uploaded input copies are stored separately in `backend/evidence/` using their case ID, for example `RC-0001_input.jpg`. Recovered and reconstructed outputs remain in `backend/recovered/`. Evidence folders are ignored by Git so private uploads are not committed.
+
+## Evaluation corpus
+
+`backend/samples/evaluation/` contains 12 reproducible test files: intact, zero-filled-gap, and corrupted JPEG, PDF, SQLite, and ZIP samples. `manifest.json` records expected type, input hash, source hash, and the synthetic damage method. These are controlled tests, not authentic filesystem-fragmented disk images.
+
+Regenerate and evaluate them from the repository root:
+
+```powershell
+python backend/samples/create_test_corpus.py
+python backend/samples/evaluate_corpus.py
+```
+
+The evaluator reports type accuracy, format-valid reconstructed output, exact source-hash matches, ML ranker precision/recall/F1/Brier score, and runtime throughput. A local 12-case baseline reached 100% type accuracy, 75% valid outputs, and 62.5% exact matches on intact plus gap-inserted cases. The ranker scored 85.7% precision, 66.7% recall, and F1 75% at a 70% threshold. These small synthetic-set results are a debugging baseline only, not a production accuracy claim; the ranker still uses six hand-authored training examples.
+
 Uploaded raw media is also signature-carved into `backend/recovered/`. Each artifact returned by the API includes a download URL such as `/api/recovered/RC-0001/artifact-1`.
 
 Raw forensic images with `.img` and `.dd` extensions use the recovery engine directly. `.E01` and `.EX01` inputs use an optional `pyewf` adapter when that package is available; otherwise the API returns an explicit conversion message and the image should be converted to raw `.dd`/`.img` before upload. The current working build limits uploaded payloads to 25 MB.
